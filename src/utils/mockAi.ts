@@ -14,27 +14,72 @@ export interface GeneratedScript {
   hashtags: string;
 }
 
-const mockCategories = ["Elektronik", "Fashion", "Kecantikan", "Rumah Tangga", "Lainnya"];
-const mockStyles = ["Modern", "Minimalis", "Kasual", "Mewah", "Unik"];
-const mockUseCases = ["Sehari-hari", "Liburan", "Kerja", "Olahraga", "Pesta"];
-const mockProducts = ["Sepatu Sneakers", "Phone Holder", "Kemeja Flanel", "Tas Selempang", "Earphone TWS"];
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
+};
 
-export const detectProduct = async (_imageFile: File): Promise<ProductDetails> => {
-  // Simulate network delay
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+export const detectProduct = async (imageFile: File): Promise<ProductDetails> => {
+  try {
+    const base64Image = await fileToBase64(imageFile);
 
-  // Generate random product details based on "analysis"
-  const randomProduct = mockProducts[Math.floor(Math.random() * mockProducts.length)];
-  const randomCategory = mockCategories[Math.floor(Math.random() * mockCategories.length)];
-  const randomStyle = mockStyles[Math.floor(Math.random() * mockStyles.length)];
-  const randomUseCase = mockUseCases[Math.floor(Math.random() * mockUseCases.length)];
+    // Call the AI Vision API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Note: For a real production app, never expose the API key in frontend code.
+        // It should be routed through a secure backend or use an environment variable.
+        'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY || ''}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an AI product detection system. Your task is to analyze the provided image and output a JSON object with the following fields: "title" (a concise and descriptive product name), "category" (the product category, e.g., Elektronik, Fashion, Kecantikan, Rumah Tangga, Lainnya), "style" (the design style, e.g., Modern, Minimalis, Kasual, Mewah, Unik), and "useCase" (the primary use case, e.g., Sehari-hari, Liburan, Kerja, Olahraga, Pesta). Make sure the JSON is valid.'
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Analyze this image and identify the product details in JSON format.' },
+              { type: 'image_url', image_url: { url: base64Image } }
+            ]
+          }
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 300,
+      })
+    });
 
-  return {
-    title: randomProduct,
-    category: randomCategory,
-    style: randomStyle,
-    useCase: randomUseCase,
-  };
+    if (!response.ok) {
+      throw new Error(`Failed to communicate with AI API: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+    const parsed = JSON.parse(content);
+
+    return {
+      title: parsed.title || 'Unknown Product',
+      category: parsed.category || 'Lainnya',
+      style: parsed.style || 'Modern',
+      useCase: parsed.useCase || 'Sehari-hari',
+    };
+  } catch (error) {
+    console.error('Error detecting product:', error);
+    // Fallback to empty/unknown values instead of random to prevent random outputs
+    return {
+      title: 'Unknown Product',
+      category: 'Lainnya',
+      style: 'Modern',
+      useCase: 'Sehari-hari',
+    };
+  }
 };
 
 const hooks = [
